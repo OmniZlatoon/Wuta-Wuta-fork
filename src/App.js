@@ -16,6 +16,7 @@ import Sidebar from './components/Sidebar';
 import CreateArt from './components/CreateArt';
 import Gallery from './components/Gallery';
 import UserProfile from './components/UserProfile';
+import AiPrompt from './components/AiPrompt';
 import EvolutionLab from './components/EvolutionLab';
 import MuseDAO from './components/MuseDAO';
 import { useMuseStore } from './store/museStore';
@@ -39,6 +40,7 @@ const App = () => {
     { id: 'create', name: 'Create Art', icon: Palette },
     { id: 'gallery', name: 'Gallery', icon: Gallery },
     { id: 'profile', name: 'Profile', icon: User },
+    { id: 'ai', name: 'AI', icon: Sparkles },
     { id: 'evolve', name: 'Evolution Lab', icon: Sparkles },
     { id: 'dao', name: 'Muse DAO', icon: Zap },
     { id: 'settings', name: 'Settings', icon: Settings },
@@ -48,6 +50,8 @@ const App = () => {
     switch (activeTab) {
       case 'create':
         return <CreateArt />;
+      case 'ai':
+        return <AiPrompt />;
       case 'gallery':
         return <Gallery />;
       case 'profile':
