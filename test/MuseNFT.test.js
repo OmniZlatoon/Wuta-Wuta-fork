@@ -1,6 +1,19 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { time } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
+const { 
+  deployMuseNFT, 
+  registerTestModels, 
+  createTestArtwork, 
+  getFutureTime, 
+  mineBlocks 
+} = require("./helpers/contracts");
+const { 
+  generateRandomHash, 
+  expectRevert, 
+  getEvent, 
+  generateMockIPFSUri 
+} = require("./helpers/utils");
 
 describe("MuseNFT", function () {
   let museNFT;
@@ -44,13 +57,29 @@ describe("MuseNFT", function () {
     it("Should not register duplicate model", async function () {
       await museNFT.registerAIModel("stable-diffusion");
       
-      await expect(museNFT.registerAIModel("stable-diffusion"))
-        .to.be.revertedWith("Model already registered");
+      await expectRevert(
+        museNFT.registerAIModel("stable-diffusion"),
+        "Model already registered"
+      );
     });
 
     it("Should not register empty model name", async function () {
-      await expect(museNFT.registerAIModel(""))
-        .to.be.revertedWith("Model name required");
+      await expectRevert(
+        museNFT.registerAIModel(""),
+        "Model name required"
+      );
+    });
+
+    it("Should allow multiple model registrations", async function () {
+      const models = ["stable-diffusion", "dall-e-3", "midjourney"];
+      
+      for (const model of models) {
+        await expect(museNFT.registerAIModel(model))
+          .to.emit(museNFT, "AIModelRegistered")
+          .withArgs(model, owner.address);
+        
+        expect(await museNFT.registeredModels(model)).to.be.true;
+      }
     });
   });
 
