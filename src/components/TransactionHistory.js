@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { 
   Clock, 
@@ -29,13 +29,7 @@ const TransactionHistory = () => {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  useEffect(() => {
-    if (address) {
-      loadTransactions();
-    }
-  }, [address, page, filter]);
-
-  const loadTransactions = async () => {
+  const loadTransactions = useCallback(async () => {
     if (!address) {
       setError('Please connect your wallet to view transaction history');
       return;
@@ -48,20 +42,22 @@ const TransactionHistory = () => {
       // Use store function to fetch transactions
       const transactionData = await fetchWutaWutaTransactions(address, 10, page);
       
-      // Apply additional filtering
-      const filteredTransactions = applyFilters(transactionData);
-      
-      setTransactions(filteredTransactions);
+      setTransactions(transactionData);
       setTotalPages(1); // Simplified for now
 
     } catch (err) {
-      console.error('Error loading transactions:', err);
       setError(err.message);
       toast.error('Failed to load transaction history');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [address, fetchWutaWutaTransactions, page]);
+
+  useEffect(() => {
+    if (address) {
+      loadTransactions();
+    }
+  }, [address, loadTransactions]);
 
   const applyFilters = (transactions) => {
     let filtered = transactions;

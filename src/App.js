@@ -5,8 +5,7 @@ import {
     LayoutDashboard,
     Sparkles,
     User,
-    History,
-    FileText
+    History
 } from 'lucide-react';
 import { Toaster } from 'react-hot-toast';
 

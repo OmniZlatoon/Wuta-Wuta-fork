@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
   User, 
@@ -30,7 +30,6 @@ const UserProfile = () => {
     loadUserCollection, 
     loadTradingHistory,
     updateCollectionFilters,
-    updateCollectionSort,
     updateCollectionView,
     getFilteredCollection,
     getFilteredTradingHistory

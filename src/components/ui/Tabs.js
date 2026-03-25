@@ -21,7 +21,7 @@ const Tabs = React.forwardRef(({
   return (
     <div ref={ref} className={`space-y-4 ${className}`} {...props}>
       <div className={orientationClasses}>
-        {React.Children.map(children, (child, index) => {
+        {React.Children.map(children, (child) => {
           if (child.type.displayName === 'TabsList') {
             return React.cloneElement(child, { activeTab, onTabChange: handleTabChange });
           }

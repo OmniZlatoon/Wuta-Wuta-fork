@@ -3,7 +3,6 @@ import { motion } from 'framer-motion';
 import { 
   Palette, 
   Sparkles, 
-  Upload, 
   Settings, 
   Zap,
   Image as ImageIcon,
@@ -24,8 +23,7 @@ const CreateArt = ({ currentPrompt, setCurrentPrompt }) => {
     isLoading, 
     advancedParameters, 
     updateAdvancedParameters,
-    parameterPresets,
-    applyParameterPreset 
+    parameterPresets
   } = useMuseStore();
   const { address } = useWalletStore();
   
@@ -57,7 +55,7 @@ const CreateArt = ({ currentPrompt, setCurrentPrompt }) => {
         prompt: currentPrompt || ''
       }));
     }
-  }, [currentPrompt]);
+  }, [currentPrompt, formData.prompt]);
 
   // Update setCurrentPrompt when formData.prompt changes
   useEffect(() => {
@@ -151,7 +149,7 @@ const CreateArt = ({ currentPrompt, setCurrentPrompt }) => {
     }
     
     try {
-      const artwork = await createCollaborativeArtwork({
+      await createCollaborativeArtwork({
         ...formData,
         humanInput,
         contentHash: humanInput ? '0x' + btoa(humanInput).slice(0, 40) : '0x0000000000000000000000000000000000000000',
