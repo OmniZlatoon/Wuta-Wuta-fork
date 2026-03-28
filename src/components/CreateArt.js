@@ -30,6 +30,10 @@ const CreateArt = () => {
     quality: 'high',
   });
   
+  // Validation state
+  const [errors, setErrors] = useState({});
+  const [touched, setTouched] = useState({});
+  
   // Canvas state
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -42,6 +46,85 @@ const CreateArt = () => {
       ...prev,
       [field]: value
     }));
+    
+    // Clear error for this field when user starts typing
+    if (errors[field]) {
+      setErrors(prev => ({
+        ...prev,
+        [field]: ''
+      }));
+    }
+    
+    // Mark field as touched
+    setTouched(prev => ({
+      ...prev,
+      [field]: true
+    }));
+  };
+  
+  const validateField = (field, value) => {
+    let error = '';
+    
+    switch (field) {
+      case 'prompt':
+        if (!value || value.trim() === '') {
+          error = 'Art prompt is required';
+        } else if (value.trim().length < 10) {
+          error = 'Prompt must be at least 10 characters long';
+        } else if (value.trim().length > 1000) {
+          error = 'Prompt must be less than 1000 characters';
+        }
+        break;
+      case 'aiModel':
+        if (!value) {
+          error = 'Please select an AI model';
+        }
+        break;
+      case 'humanContribution':
+        if (value < 0 || value > 100) {
+          error = 'Human contribution must be between 0% and 100%';
+        }
+        break;
+      case 'aiContribution':
+        if (value < 0 || value > 100) {
+          error = 'AI contribution must be between 0% and 100%';
+        }
+        break;
+    }
+    
+    return error;
+  };
+  
+  const validateForm = () => {
+    const newErrors = {};
+    
+    // Validate prompt
+    const promptError = validateField('prompt', formData.prompt);
+    if (promptError) newErrors.prompt = promptError;
+    
+    // Validate AI model
+    const modelError = validateField('aiModel', formData.aiModel);
+    if (modelError) newErrors.aiModel = modelError;
+    
+    // Validate contributions
+    const humanError = validateField('humanContribution', formData.humanContribution);
+    if (humanError) newErrors.humanContribution = humanError;
+    
+    const aiError = validateField('aiContribution', formData.aiContribution);
+    if (aiError) newErrors.aiContribution = aiError;
+    
+    // Check if human input is provided
+    if (!humanInput) {
+      newErrors.humanInput = 'Please provide human input by drawing or uploading an image';
+    }
+    
+    // Check if contributions add up to 100%
+    if (formData.humanContribution + formData.aiContribution !== 100) {
+      newErrors.contribution = 'Human and AI contributions must add up to 100%';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
   
   const handleContributionChange = (type, value) => {
@@ -124,6 +207,11 @@ const CreateArt = () => {
       const ctx = canvasRef.current.getContext('2d');
       ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
       setHumanInput(null);
+      // Clear human input error when canvas is cleared
+      setErrors(prev => ({
+        ...prev,
+        humanInput: ''
+      }));
     }
   };
 
@@ -164,6 +252,11 @@ const CreateArt = () => {
         // Save canvas as image
         const imageData = canvas.toDataURL();
         setHumanInput(imageData);
+        // Clear human input error when file is uploaded successfully
+        setErrors(prev => ({
+          ...prev,
+          humanInput: ''
+        }));
         toast.success('Image uploaded successfully!');
       };
       img.src = event.target.result;
@@ -186,8 +279,9 @@ const CreateArt = () => {
       return;
     }
     
-    if (!formData.prompt.trim()) {
-      toast.error('Please enter a prompt');
+    // Validate form
+    if (!validateForm()) {
+      toast.error('Please fix the validation errors');
       return;
     }
     
@@ -210,6 +304,8 @@ const CreateArt = () => {
         aspectRatio: '1:1',
         quality: 'high',
       });
+      setErrors({});
+      setTouched({});
       
     } catch (error) {
       toast.error(error.message || 'Failed to create artwork');
@@ -281,10 +377,25 @@ const CreateArt = () => {
             <textarea
               value={formData.prompt}
               onChange={(e) => handleInputChange('prompt', e.target.value)}
+              onBlur={() => setTouched(prev => ({ ...prev, prompt: true }))}
               placeholder="Describe your artwork... (e.g., 'Abstract cosmic landscape with swirling colors')"
-              className="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+              className={`w-full p-4 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none ${
+                errors.prompt && touched.prompt
+                  ? 'border-red-500 focus:ring-red-500'
+                  : 'border-gray-300'
+              }`}
               rows={4}
             />
+            
+            {errors.prompt && touched.prompt && (
+              <div className="mt-2 text-sm text-red-600">
+                {errors.prompt}
+              </div>
+            )}
+            
+            <div className="mt-2 text-sm text-gray-500">
+              {formData.prompt.length}/1000 characters
+            </div>
             
             <div className="mt-4 flex flex-wrap gap-2">
               {['Abstract', 'Realistic', 'Surreal', 'Cosmic', 'Nature', 'Urban'].map((style) => (
@@ -317,7 +428,9 @@ const CreateArt = () => {
               <div>
                 <div className="flex justify-between mb-2">
                   <span className="text-sm font-medium">Human Contribution</span>
-                  <span className="text-sm text-purple-600">{formData.humanContribution}%</span>
+                  <span className={`text-sm ${errors.humanContribution ? 'text-red-600' : 'text-purple-600'}`}>
+                    {formData.humanContribution}%
+                  </span>
                 </div>
                 <input
                   type="range"
@@ -332,7 +445,9 @@ const CreateArt = () => {
               <div>
                 <div className="flex justify-between mb-2">
                   <span className="text-sm font-medium">AI Contribution</span>
-                  <span className="text-sm text-blue-600">{formData.aiContribution}%</span>
+                  <span className={`text-sm ${errors.aiContribution ? 'text-red-600' : 'text-blue-600'}`}>
+                    {formData.aiContribution}%
+                  </span>
                 </div>
                 <input
                   type="range"
@@ -343,6 +458,12 @@ const CreateArt = () => {
                   className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
                 />
               </div>
+              
+              {errors.contribution && (
+                <div className="text-sm text-red-600">
+                  {errors.contribution}
+                </div>
+              )}
             </div>
           </motion.div>
           
@@ -489,6 +610,12 @@ const CreateArt = () => {
                       </>
                     )}
                   </div>
+                </div>
+              )}
+              
+              {errors.humanInput && (
+                <div className="absolute bottom-2 left-2 right-2 bg-red-50 border border-red-200 rounded p-2">
+                  <p className="text-sm text-red-600">{errors.humanInput}</p>
                 </div>
               )}
             </div>

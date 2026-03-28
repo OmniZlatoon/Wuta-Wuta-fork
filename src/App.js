@@ -10,12 +10,14 @@ import {
   User,
   Zap,
   Wallet,
-  Activity
+  Activity,
+  BarChart3
 } from 'lucide-react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import CreateArt from './components/CreateArt';
 import Gallery from './components/Gallery';
+import Dashboard from './components/Dashboard';
 import EvolutionLab from './components/EvolutionLab';
 import MuseDAO from './components/MuseDAO';
 import TransactionHistory from './components/TransactionHistory';
@@ -26,7 +28,7 @@ import './App.css';
 const queryClient = new QueryClient();
 
 const App = () => {
-  const [activeTab, setActiveTab] = useState('create');
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const { initializeMuse, isConnected } = useMuseStore();
   const { connectWallet, disconnectWallet, address } = useWalletStore();
@@ -37,6 +39,7 @@ const App = () => {
   }, [initializeMuse]);
 
   const navigation = [
+    { id: 'dashboard', name: 'Dashboard', icon: BarChart3 },
     { id: 'create', name: 'Create Art', icon: Palette },
     { id: 'gallery', name: 'Gallery', icon: Gallery },
     { id: 'evolve', name: 'Evolution Lab', icon: Sparkles },
@@ -47,6 +50,8 @@ const App = () => {
 
   const renderContent = () => {
     switch (activeTab) {
+      case 'dashboard':
+        return <Dashboard />;
       case 'create':
         return <CreateArt />;
       case 'gallery':
@@ -60,7 +65,7 @@ const App = () => {
       case 'settings':
         return <div>Settings</div>;
       default:
-        return <CreateArt />;
+        return <Dashboard />;
     }
   };
 
