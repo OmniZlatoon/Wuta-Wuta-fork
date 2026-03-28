@@ -1,103 +1,95 @@
-import React, { useState, useEffect } from 'react';
-import { QueryClient, QueryClientProvider } from 'react-query';
-import { Toaster } from 'react-hot-toast';
-import { motion } from 'framer-motion';
-import { 
-  Palette, 
-  Sparkles, 
-  Gallery, 
-  Settings,
-  User,
-  Zap,
-  Wallet,
-  Activity
-} from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { LayoutDashboard, Image, PlusCircle, History, Sparkles, Settings, Send } from 'lucide-react';
+
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
-import CreateArt from './components/CreateArt';
-import Gallery from './components/Gallery';
-import EvolutionLab from './components/EvolutionLab';
-import MuseDAO from './components/MuseDAO';
-import TransactionHistory from './components/TransactionHistory';
-import { useMuseStore } from './store/museStore';
-import { useWalletStore } from './store/walletStore';
-import './App.css';
-
-const queryClient = new QueryClient();
+import Dashboard from './components/Dashboard';
+import MintingDashboard from './components/MintingDashboard';
+import ArtMintingStepper from './components/ArtMintingStepper';
 
 const App = () => {
-  const [activeTab, setActiveTab] = useState('create');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const { initializeMuse, isConnected } = useMuseStore();
-  const { connectWallet, disconnectWallet, address } = useWalletStore();
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [address, setAddress] = useState('');
 
+  // Keep initial theme in sync before the first user toggle.
   useEffect(() => {
-    // Initialize Muse connection
-    initializeMuse();
-  }, [initializeMuse]);
+    const storedTheme = localStorage.getItem('theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const shouldUseDark = storedTheme ? storedTheme === 'dark' : prefersDark;
+    document.documentElement.classList.toggle('dark', shouldUseDark);
+  }, []);
 
-  const navigation = [
-    { id: 'create', name: 'Create Art', icon: Palette },
-    { id: 'gallery', name: 'Gallery', icon: Gallery },
-    { id: 'evolve', name: 'Evolution Lab', icon: Sparkles },
-    { id: 'dao', name: 'Muse DAO', icon: Zap },
-    { id: 'transactions', name: 'Transactions', icon: Activity },
-    { id: 'settings', name: 'Settings', icon: Settings },
-  ];
+  const navigation = useMemo(
+    () => [
+      { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
+      { id: 'gallery', name: 'Gallery', icon: Image },
+      { id: 'create', name: 'Create', icon: PlusCircle },
+      { id: 'minting', name: 'Minting', icon: Send },
+      { id: 'history', name: 'History', icon: History },
+      { id: 'ai', name: 'AI Studio', icon: Sparkles },
+      { id: 'settings', name: 'Settings', icon: Settings },
+    ],
+    []
+  );
 
+  const handleConnectWallet = () => {
+    setIsConnected(true);
+    setAddress('GBRP...WUTA');
+  };
+
+  const handleDisconnectWallet = () => {
+    setIsConnected(false);
+    setAddress('');
+  };
+
+  // Render main content based on activeTab
   const renderContent = () => {
     switch (activeTab) {
+      case 'dashboard':
+        return <Dashboard />;
+      case 'minting':
+        return <MintingDashboard />;
       case 'create':
-        return <CreateArt />;
+        return <ArtMintingStepper />;
       case 'gallery':
-        return <Gallery />;
-      case 'evolve':
-        return <EvolutionLab />;
-      case 'dao':
-        return <MuseDAO />;
-      case 'transactions':
-        return <TransactionHistory />;
+      case 'history':
+      case 'ai':
       case 'settings':
-        return <div>Settings</div>;
       default:
-        return <CreateArt />;
+        // Render Dashboard as fallback for unhandled tabs
+        return <Dashboard />;
     }
   };
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50">
-        <Toaster position="top-right" />
-        
-        <Header 
-          onMenuClick={() => setSidebarOpen(!sidebarOpen)}
-          onConnectWallet={connectWallet}
-          onDisconnectWallet={disconnectWallet}
-          address={address}
-          isConnected={isConnected}
+    <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100 transition-colors duration-300">
+      <Header
+        onMenuClick={() => setIsSidebarOpen((prev) => !prev)}
+        onConnectWallet={handleConnectWallet}
+        onDisconnectWallet={handleDisconnectWallet}
+        address={address}
+        isConnected={isConnected}
+      />
+
+      <div className="pt-16 sm:pt-20 md:flex">
+        <Sidebar
+          navigation={navigation}
+          activeTab={activeTab}
+          onTabChange={(tab) => {
+            setActiveTab(tab);
+            setIsSidebarOpen(false);
+          }}
+          isOpen={isSidebarOpen}
+          onClose={() => setIsSidebarOpen(false)}
         />
 
-        <div className="flex">
-          <Sidebar 
-            navigation={navigation}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            isOpen={sidebarOpen}
-          />
-
-          <main className={`flex-1 transition-all duration-300 ${sidebarOpen ? 'ml-64' : 'ml-0'}`}>
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="p-6"
-            >
-              {renderContent()}
-            </motion.div>
-          </main>
-        </div>
+        <main className="flex-1 min-w-0">
+          {renderContent()}
+        </main>
       </div>
-    </QueryClientProvider>
+    </div>
   );
 };
 

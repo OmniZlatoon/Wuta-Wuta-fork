@@ -1,23 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { 
   Clock, 
   ArrowUpRight, 
-  ArrowDownLeft, 
   ExternalLink,
   RefreshCw,
-  Filter,
-  XLM,
+  Coins,
   Search,
   Calendar,
   Activity
 } from 'lucide-react';
-import { useMuseStore } from '../store/museStore';
-import { useWalletStore } from '../store/walletStore';
 import toast from 'react-hot-toast';
 
+import { useMuseStore } from '../store/museStore';
+import { useWalletStore } from '../store/walletStore';
+
+import CopyButton from './CopyButton';
+
 const TransactionHistory = () => {
-  const { userAddress, fetchWutaWutaTransactions } = useMuseStore();
+  const { fetchWutaWutaTransactions } = useMuseStore();
   const { address } = useWalletStore();
   
   const [transactions, setTransactions] = useState([]);
@@ -28,17 +29,7 @@ const TransactionHistory = () => {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  // Horizon API configuration
-  const HORIZON_URL = process.env.REACT_APP_HORIZON_URL || 'https://horizon-testnet.stellar.org';
-  const WUTA_WUTA_CONTRACT = process.env.REACT_APP_WUTA_WUTA_CONTRACT || contracts?.nftMarketplace;
-
-  useEffect(() => {
-    if (address) {
-      loadTransactions();
-    }
-  }, [address, page, filter]);
-
-  const loadTransactions = async () => {
+  const loadTransactions = useCallback(async () => {
     if (!address) {
       setError('Please connect your wallet to view transaction history');
       return;
@@ -51,20 +42,22 @@ const TransactionHistory = () => {
       // Use store function to fetch transactions
       const transactionData = await fetchWutaWutaTransactions(address, 10, page);
       
-      // Apply additional filtering
-      const filteredTransactions = applyFilters(transactionData);
-      
-      setTransactions(filteredTransactions);
+      setTransactions(transactionData);
       setTotalPages(1); // Simplified for now
 
     } catch (err) {
-      console.error('Error loading transactions:', err);
       setError(err.message);
       toast.error('Failed to load transaction history');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [address, fetchWutaWutaTransactions, page]);
+
+  useEffect(() => {
+    if (address) {
+      loadTransactions();
+    }
+  }, [address, loadTransactions]);
 
   const applyFilters = (transactions) => {
     let filtered = transactions;
@@ -239,7 +232,7 @@ const TransactionHistory = () => {
           className="bg-white rounded-lg shadow p-4"
         >
           <div className="flex items-center">
-            <XLM className="w-8 h-8 text-blue-600 mr-3" />
+            <Coins className="w-8 h-8 text-blue-600 mr-3" />
             <div>
               <p className="text-2xl font-bold text-gray-900">
                 {filteredTransactions.reduce((sum, tx) => sum + (parseFloat(tx.fee) || 0), 0).toFixed(2)}
@@ -330,8 +323,11 @@ const TransactionHistory = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900 font-mono">
-                        {tx.hash.slice(0, 8)}...{tx.hash.slice(-8)}
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm text-gray-900 font-mono">
+                          {tx.hash.slice(0, 8)}...{tx.hash.slice(-8)}
+                        </div>
+                        <CopyButton text={tx.hash} />
                       </div>
                       {tx.memo && (
                         <div className="text-xs text-gray-500 mt-1">Memo: {tx.memo}</div>
