@@ -65,7 +65,7 @@ jest.mock('../../store/museStore', () => ({
 // Mock react-router-dom
 const MockRouter = ({ children }) => <div>{children}</div>;
 
-describe.skip('Gallery Component', () => {
+describe('Gallery Component', () => {
   const renderComponent = () => {
     return render(
       <MockRouter>
@@ -271,7 +271,7 @@ describe.skip('Gallery Component', () => {
       fireEvent.click(confirmButton);
 
       await waitFor(() => {
-        expect(mockBuyArtwork).toHaveBeenCalledWith(1);
+        expect(mockBuyArtwork).toHaveBeenCalledWith(1, '0.5');
       });
     });
 
