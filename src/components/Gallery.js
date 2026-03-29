@@ -59,10 +59,15 @@ const Gallery = () => {
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
+  const [selectedAIModel, setSelectedAIModel] = useState('all');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
   const [sortBy, setSortBy] = useState('recent');
+  const [page, setPage] = useState(1);
+  const [gridColumns, setGridColumns] = useState('grid-cols-1');
   const [selectedArtwork, setSelectedArtwork] = useState(null);
   const [purchaseArtwork, setPurchaseArtwork] = useState(null);
-  const [purchaseState, setPurchaseState] = useState({ loading: false, error: '' });
+  const [purchaseState, setPurchaseState] = useState({ loading: false, error: '', success: '' });
 
   useEffect(() => {
     if (fetchAllArtworks) {
@@ -70,13 +75,36 @@ const Gallery = () => {
     }
   }, [fetchAllArtworks]);
 
+  useEffect(() => {
+    const updateGridColumns = () => {
+      if (window.innerWidth < 640) setGridColumns('grid-cols-1');
+      else if (window.innerWidth < 1024) setGridColumns('md:grid-cols-2');
+      else setGridColumns('xl:grid-cols-3');
+    };
+
+    updateGridColumns();
+    window.addEventListener('resize', updateGridColumns);
+    return () => window.removeEventListener('resize', updateGridColumns);
+  }, []);
+
   const normalizedArtworks = useMemo(
     () => artworks.map((artwork) => normalizeArtwork(artwork, listings)),
     [artworks, listings]
   );
 
+  const availableAIModels = useMemo(() => {
+    const models = normalizedArtworks
+      .map((artwork) => artwork.aiModel || 'Unknown model')
+      .filter(Boolean);
+
+    return Array.from(new Set(models));
+  }, [normalizedArtworks]);
+
   const filteredArtworks = useMemo(() => {
     const search = query.trim().toLowerCase();
+    const min = Number(minPrice) || 0;
+    const max = Number(maxPrice) || Number.POSITIVE_INFINITY;
+
     const next = normalizedArtworks.filter((artwork) => {
       const matchesSearch =
         !search ||
@@ -90,32 +118,55 @@ const Gallery = () => {
         (filter === 'listed' && artwork.price !== null) ||
         (filter === 'unlisted' && artwork.price === null);
 
-      return matchesSearch && matchesFilter;
+      const matchesAIModel =
+        selectedAIModel === 'all' ||
+        artwork.aiModel.toLowerCase() === selectedAIModel.toLowerCase();
+
+      const priceValue = Number(artwork.price ?? 0);
+      const matchesPrice = priceValue >= min && priceValue <= max;
+
+      return matchesSearch && matchesFilter && matchesAIModel && matchesPrice;
     });
 
     next.sort((left, right) => {
       if (sortBy === 'price-high') return Number(right.price || 0) - Number(left.price || 0);
       if (sortBy === 'price-low') return Number(left.price || 0) - Number(right.price || 0);
       if (sortBy === 'title') return left.title.localeCompare(right.title);
+      if (sortBy === 'oldest') return new Date(left.createdAt || 0).getTime() - new Date(right.createdAt || 0).getTime();
+      if (sortBy === 'newest') return new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime();
       return new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime();
     });
 
     return next;
-  }, [normalizedArtworks, query, filter, sortBy]);
+  }, [normalizedArtworks, query, filter, selectedAIModel, minPrice, maxPrice, sortBy]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredArtworks.length / 9));
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(1);
+    }
+  }, [page, totalPages]);
+
+  const paginatedArtworks = useMemo(() => {
+    const startIndex = (page - 1) * 9;
+    return filteredArtworks.slice(startIndex, startIndex + 9);
+  }, [filteredArtworks, page]);
 
   const handlePurchase = async () => {
     if (!purchaseArtwork || !buyArtwork) return;
 
-    setPurchaseState({ loading: true, error: '' });
+    setPurchaseState({ loading: true, error: '', success: '' });
 
     try {
       await buyArtwork(purchaseArtwork.id, purchaseArtwork.price);
       setPurchaseArtwork(null);
-      setPurchaseState({ loading: false, error: '' });
+      setPurchaseState({ loading: false, error: '', success: 'Purchase successful!' });
     } catch (error) {
       setPurchaseState({
         loading: false,
         error: error.message || 'Purchase failed',
+        success: '',
       });
     }
   };
@@ -151,24 +202,63 @@ const Gallery = () => {
         </div>
 
         <div className="rounded-3xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-          <div className="grid gap-4 lg:grid-cols-[1.6fr_0.7fr_0.7fr]">
+          <div className="grid gap-4 lg:grid-cols-3">
             <div className="relative">
+              <label htmlFor="gallery-search" className="sr-only">Search artworks</label>
               <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <input
+                id="gallery-search"
+                aria-label="Search artworks..."
                 type="text"
-                placeholder="Search artworks, prompts, or models..."
+                placeholder="Search artworks..."
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => { setQuery(event.target.value); setPage(1); }}
                 className="w-full rounded-2xl border border-gray-200 bg-gray-50 py-3 pl-11 pr-4 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
               />
             </div>
 
-            <div className="relative">
-              <Filter className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <div>
+              <label htmlFor="filter-ai-model" className="block text-xs font-medium text-gray-500">Filter by AI Model</label>
               <select
+                id="filter-ai-model"
+                aria-label="Filter by AI Model"
+                value={selectedAIModel}
+                onChange={(event) => { setSelectedAIModel(event.target.value); setPage(1); }}
+                className="mt-1 w-full rounded-2xl border border-gray-200 bg-gray-50 px-3 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+              >
+                <option value="all">All models</option>
+                {availableAIModels.map((model) => (
+                  <option key={model} value={model}>{model}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="sort-by" className="block text-xs font-medium text-gray-500">Sort by</label>
+              <select
+                id="sort-by"
+                aria-label="Sort by"
+                value={sortBy}
+                onChange={(event) => { setSortBy(event.target.value); setPage(1); }}
+                className="mt-1 w-full rounded-2xl border border-gray-200 bg-gray-50 px-3 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+              >
+                <option value="recent">Most recent</option>
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="price-high">Price: high to low</option>
+                <option value="price-low">Price: low to high</option>
+                <option value="title">Title</option>
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="base-filter" className="block text-xs font-medium text-gray-500">Filter by Status</label>
+              <select
+                id="base-filter"
+                aria-label="Filter by Status"
                 value={filter}
-                onChange={(event) => setFilter(event.target.value)}
-                className="w-full appearance-none rounded-2xl border border-gray-200 bg-gray-50 py-3 pl-11 pr-4 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+                onChange={(event) => { setFilter(event.target.value); setPage(1); }}
+                className="mt-1 w-full rounded-2xl border border-gray-200 bg-gray-50 px-3 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
               >
                 <option value="all">All artworks</option>
                 <option value="listed">Listed</option>
@@ -177,17 +267,39 @@ const Gallery = () => {
               </select>
             </div>
 
-            <select
-              value={sortBy}
-              onChange={(event) => setSortBy(event.target.value)}
-              className="w-full appearance-none rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
-            >
-              <option value="recent">Most recent</option>
-              <option value="price-high">Price: high to low</option>
-              <option value="price-low">Price: low to high</option>
-              <option value="title">Title</option>
-            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label htmlFor="min-price" className="block text-xs font-medium text-gray-500">Min Price</label>
+                <input
+                  id="min-price"
+                  aria-label="Min Price"
+                  type="number"
+                  value={minPrice}
+                  min="0"
+                  step="0.01"
+                  onChange={(event) => { setMinPrice(event.target.value); setPage(1); }}
+                  className="mt-1 w-full rounded-2xl border border-gray-200 bg-gray-50 px-3 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+                />
+              </div>
+              <div>
+                <label htmlFor="max-price" className="block text-xs font-medium text-gray-500">Max Price</label>
+                <input
+                  id="max-price"
+                  aria-label="Max Price"
+                  type="number"
+                  value={maxPrice}
+                  min="0"
+                  step="0.01"
+                  onChange={(event) => { setMaxPrice(event.target.value); setPage(1); }}
+                  className="mt-1 w-full rounded-2xl border border-gray-200 bg-gray-50 px-3 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+                />
+              </div>
+            </div>
           </div>
+
+          <p role="status" aria-live="polite" className="mt-3 text-sm text-gray-600 dark:text-gray-300">
+            Showing {paginatedArtworks.length} of {filteredArtworks.length} artwork(s)
+          </p>
         </div>
 
         {isLoading ? (
@@ -204,7 +316,7 @@ const Gallery = () => {
           </div>
         ) : (
           <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-            {filteredArtworks.map((artwork) => (
+            {paginatedArtworks.map((artwork) => (
               <article
                 key={artwork.id}
                 data-testid={`artwork-card-${artwork.id}`}
@@ -286,6 +398,30 @@ const Gallery = () => {
               </article>
             ))}
           </div>
+
+          {totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+                disabled={page === 1}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+              >
+                Previous
+              </button>
+
+              <span className="text-sm font-medium">Page {page} of {totalPages}</span>
+
+              <button
+                type="button"
+                onClick={() => setPage((prev) => Math.min(prev + 1, totalPages))}
+                disabled={page === totalPages}
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          )}
         )}
       </div>
 
