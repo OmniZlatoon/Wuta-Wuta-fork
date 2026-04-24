@@ -1,531 +1,576 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { 
-  Palette, 
-  Sparkles, 
-  Upload, 
-  Settings, 
-  Zap,
-  Image as ImageIcon,
-  Type,
-  Sliders
-} from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { CheckCircle2, Cpu, Plus, RefreshCw, Settings2, Sparkles, Loader2 } from 'lucide-react';
+
 import { useMuseStore } from '../store/museStore';
-import { useWalletStore } from '../store/walletStore';
-import AdvancedSettings from './AdvancedSettings';
-import toast from 'react-hot-toast';
+import { useTransactionNotificationStore } from '../store/transactionNotificationStore';
+import ProgressIndicator from './ui/ProgressIndicator';
 
-const CreateArt = ({ currentPrompt, setCurrentPrompt }) => {
-  const { 
-    createCollaborativeArtwork, 
-    aiModels, 
-    isLoading, 
-    advancedParameters, 
-    updateAdvancedParameters,
-    parameterPresets,
-    applyParameterPreset 
-  } = useMuseStore();
-  const { address } = useWalletStore();
-  
-  // Form state
-  const [formData, setFormData] = useState({
-    prompt: currentPrompt || '',
-    aiModel: 'stable-diffusion',
-    humanContribution: 60,
-    aiContribution: 40,
-    canEvolve: true,
-    style: 'realistic',
-    aspectRatio: '1:1',
-    quality: 'high',
+function normalizeModels(aiModels = []) {
+  return aiModels.map((model) => {
+    if (typeof model === 'string') {
+      return { id: model, name: model, description: '' };
+    }
+
+    return {
+      id: model.id || model.name || '',
+      name: model.name || model.id || 'Unnamed model',
+      description: model.description || '',
+    };
   });
-  
-  // Advanced settings state
-  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
-  
-  // Canvas state
-  const canvasRef = useRef(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [humanInput, setHumanInput] = useState(null);
+}
 
-  // Sync currentPrompt with formData
-  useEffect(() => {
-    if (currentPrompt !== formData.prompt) {
-      setFormData(prev => ({
-        ...prev,
-        prompt: currentPrompt || ''
-      }));
-    }
-  }, [currentPrompt]);
+function isValidUri(value) {
+  if (!value) return false;
+  if (value.startsWith('ipfs://')) return value.length > 'ipfs://'.length;
 
-  // Update setCurrentPrompt when formData.prompt changes
-  useEffect(() => {
-    if (setCurrentPrompt) {
-      setCurrentPrompt(formData.prompt);
-    }
-  }, [formData.prompt, setCurrentPrompt]);
+  try {
+    const parsed = new URL(value);
+    return ['http:', 'https:'].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+
+function clampContribution(value) {
+  const parsed = Number(value);
+  if (Number.isNaN(parsed)) return 0;
+  return Math.min(100, Math.max(0, parsed));
+}
+
+function generateHash() {
+  const alphabet = 'abcdef0123456789';
+  let hash = '0x';
+
+  for (let index = 0; index < 64; index += 1) {
+    hash += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+
+  return hash;
+}
+
+const defaultAdvancedParameters = {
+  temperature: 0.8,
+  topK: 50,
+  topP: 0.9,
+  guidanceScale: 7.5,
+  numInferenceSteps: 50,
+};
+
+const CreateArt = () => {
+  const store = useMuseStore();
+  const { addTransaction, updateTransactionStatus, STATUS } = useTransactionNotificationStore();
   
-  const handleInputChange = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
+  const isConnected = store.isConnected || Boolean(store.userAddress);
+  const isLoading = store.isLoading;
+  const clearError = store.clearError;
+  const setAdvancedParameters = store.setAdvancedParameters;
+  const registerAIModel = store.registerAIModel;
+  const createArtworkAction = store.createArtwork || store.createCollaborativeArtwork;
+  const models = useMemo(() => normalizeModels(store.aiModels), [store.aiModels]);
+  const advancedParameters = store.advancedParameters || defaultAdvancedParameters;
+
+  const [form, setForm] = useState({
+    aiModel: models[0]?.id || '',
+    humanContribution: 50,
+    aiContribution: 50,
+    prompt: '',
+    tokenURI: '',
+    contentHash: '',
+    canEvolve: true,
+  });
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [registerModelName, setRegisterModelName] = useState('');
+  const [registerModelDescription, setRegisterModelDescription] = useState('');
+  const [errors, setErrors] = useState({});
+  const [submitError, setSubmitError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [creationProgress, setCreationProgress] = useState(0);
+
+  // Steps for progress indicator
+  const creationSteps = [
+    { label: 'Uploading metadata' },
+    { label: 'AI Generation' },
+    { label: 'Stellar Submission' },
+    { label: 'Finalizing' }
+  ];
+
+  const [currentStep, setCurrentStep] = useState(-1);
+
+  const updateField = (key, value) => {
+    setForm((current) => ({ ...current, [key]: value }));
+    setErrors((current) => {
+      if (!current[key]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
   };
-  
-  const handleContributionChange = (type, value) => {
-    const otherType = type === 'human' ? 'ai' : 'human';
-    const otherValue = 100 - value;
-    
-    setFormData(prev => ({
-      ...prev,
-      [`${type}Contribution`]: value,
-      [`${otherType}Contribution`]: otherValue
-    }));
+
+  const handleHumanContributionChange = (event) => {
+    const nextHuman = clampContribution(event.target.value);
+    updateField('humanContribution', nextHuman);
+    updateField('aiContribution', 100 - nextHuman);
   };
-  
-  const handleCanvasDraw = (e) => {
-    if (!canvasRef.current || !isDrawing) return;
-    
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    
-    // Support touch and mouse events
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-    
-    ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = '#8b5cf6';
-    
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x, y);
+
+  const handleAiContributionChange = (event) => {
+    const nextAi = clampContribution(event.target.value);
+    updateField('aiContribution', nextAi);
+    updateField('humanContribution', 100 - nextAi);
   };
-  
-  const startDrawing = (e) => {
-    // Prevent scrolling when touching canvas
-    if (e.type.startsWith('touch')) {
-        e.preventDefault();
+
+  const validateForm = () => {
+    const nextErrors = {};
+
+    if (!form.aiModel) nextErrors.aiModel = 'AI Model is required';
+    if (!form.prompt.trim()) nextErrors.prompt = 'Prompt is required';
+
+    if (!form.tokenURI.trim()) {
+      nextErrors.tokenURI = 'Token URI is required';
+    } else if (!isValidUri(form.tokenURI.trim())) {
+      nextErrors.tokenURI = 'Please enter a valid URI';
     }
-    setIsDrawing(true);
-    handleCanvasDraw(e);
+
+    if (form.humanContribution < 0 || form.humanContribution > 100) {
+      nextErrors.humanContribution = 'Contribution must be between 0 and 100';
+    }
+
+    if (form.aiContribution < 0 || form.aiContribution > 100) {
+      nextErrors.aiContribution = 'Contribution must be between 0 and 100';
+    }
+
+    if (form.humanContribution + form.aiContribution !== 100) {
+      nextErrors.contributions = 'Contributions must sum to 100%';
+    }
+
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
   };
-  
-  const stopDrawing = () => {
-    if (isDrawing && canvasRef.current) {
-      const ctx = canvasRef.current.getContext('2d');
-      ctx.beginPath();
-      setIsDrawing(false);
-      
-      // Save canvas as image
-      const imageData = canvasRef.current.toDataURL();
-      setHumanInput(imageData);
-    }
-  };
-  
-  const clearCanvas = () => {
-    if (canvasRef.current) {
-      const ctx = canvasRef.current.getContext('2d');
-      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-      setHumanInput(null);
-    }
-  };
-  
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!address) {
-      toast.error('Please connect your wallet first');
-      return;
-    }
-    
-    if (!formData.prompt.trim()) {
-      toast.error('Please enter a prompt');
-      return;
-    }
-    
+
+  const handleRegisterModel = async (event) => {
+    event.preventDefault();
+    if (!registerModelName.trim()) return;
+
+    const payload = {
+      id: registerModelName.trim().toLowerCase().replace(/\s+/g, '-'),
+      name: registerModelName.trim(),
+      description: registerModelDescription.trim(),
+    };
+
     try {
-      const artwork = await createCollaborativeArtwork({
-        ...formData,
-        humanInput,
-        contentHash: humanInput ? '0x' + btoa(humanInput).slice(0, 40) : '0x0000000000000000000000000000000000000000',
-        advancedParameters: advancedParameters, // Include advanced parameters
-      });
-      
-      toast.success('Artwork created successfully!');
-      clearCanvas();
-      setFormData({
-        prompt: '',
-        aiModel: 'stable-diffusion',
-        humanContribution: 60,
-        aiContribution: 40,
-        canEvolve: true,
-        style: 'realistic',
-        aspectRatio: '1:1',
-        quality: 'high',
-      });
-      
+      if (registerAIModel) {
+        await registerAIModel(payload);
+      }
+
+      setForm((current) => ({ ...current, aiModel: payload.id }));
+      setShowRegisterModal(false);
+      setRegisterModelName('');
+      setRegisterModelDescription('');
     } catch (error) {
-      toast.error(error.message || 'Failed to create artwork');
+      setSubmitError(error.message || 'Failed to register AI model');
     }
   };
-  
-  const handleAdvancedParametersChange = (newParameters) => {
-    updateAdvancedParameters(newParameters);
-  };
-  
-  const handlePresetApply = (presetParameters) => {
-    updateAdvancedParameters(presetParameters);
-    toast.success('Preset applied successfully!');
-  };
-  
-  return (
-    <div className="space-y-6 sm:space-y-8">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl sm:text-4xl font-black text-gray-900 tracking-tight mb-2">Create AI-Human Art</h1>
-          <p className="text-sm sm:text-base text-gray-600">Collaborate with AI to create unique digital artwork</p>
-        </div>
-      </div>
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setSuccessMessage('');
+    setSubmitError('');
+
+    if (!validateForm()) return;
+
+    if (!createArtworkAction) {
+      setSubmitError('Artwork creation is not available in the current store.');
+      return;
+    }
+
+    const txId = `creation-${Date.now()}`;
+    addTransaction({
+      id: txId,
+      type: 'Artwork Creation',
+      details: { prompt: form.prompt }
+    });
+
+    try {
+      setCurrentStep(0);
+      setCreationProgress(10);
       
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
-        {/* Left Column - Input */}
-        <div className="lg:col-span-7 space-y-6">
-          {/* AI Model Selection */}
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.1 }}
-            className="bg-white rounded-xl sm:rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6"
-          >
-            <div className="flex items-center mb-4 sm:mb-5">
-              <div className="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center mr-3">
-                <Zap className="w-4 h-4 text-purple-600" />
-              </div>
-              <h3 className="text-base sm:text-lg font-bold text-gray-900">AI Model</h3>
+      // Step 1: Metadata upload simulation
+      await new Promise(r => setTimeout(r, 1000));
+      setCreationProgress(25);
+      
+      setCurrentStep(1);
+      // Step 2: AI Generation
+      await new Promise(r => setTimeout(r, 2000));
+      setCreationProgress(50);
+      
+      setCurrentStep(2);
+      // Step 3: Blockchain submission
+      const payload = {
+        aiModel: form.aiModel,
+        prompt: form.prompt.trim(),
+        tokenURI: form.tokenURI.trim(),
+        humanContribution: form.humanContribution,
+        aiContribution: form.aiContribution,
+        contentHash: form.contentHash || generateHash(),
+        canEvolve: form.canEvolve,
+      };
+
+      await createArtworkAction(payload);
+      setCreationProgress(85);
+      
+      setCurrentStep(3);
+      // Step 4: Finalizing
+      await new Promise(r => setTimeout(r, 1000));
+      setCreationProgress(100);
+
+      updateTransactionStatus(txId, STATUS.CONFIRMED);
+      setSuccessMessage('Artwork created successfully.');
+      
+      setForm((current) => ({
+        ...current,
+        prompt: '',
+        tokenURI: '',
+        contentHash: '',
+      }));
+      
+      setTimeout(() => {
+        setCurrentStep(-1);
+        setCreationProgress(0);
+      }, 3000);
+
+    } catch (error) {
+      updateTransactionStatus(txId, STATUS.FAILED, { error: error.message });
+      setSubmitError(error.message || 'Creation failed');
+      setCurrentStep(-1);
+      setCreationProgress(0);
+    }
+  };
+
+  if (!isConnected) {
+    return (
+      <section className="min-h-[calc(100vh-5rem)] bg-gray-50 dark:bg-gray-950 p-6 md:p-8">
+        <div className="mx-auto max-w-3xl rounded-3xl border border-dashed border-purple-200 bg-white p-10 text-center shadow-sm dark:border-purple-900/40 dark:bg-gray-900">
+          <Sparkles className="mx-auto mb-4 h-10 w-10 text-purple-600" />
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Create Collaborative Artwork</h1>
+          <p className="mt-3 text-gray-600 dark:text-gray-300">
+            Please connect your wallet to create artwork.
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="min-h-[calc(100vh-5rem)] bg-gray-50 dark:bg-gray-950 p-6 md:p-8">
+      <div className="mx-auto max-w-4xl space-y-6">
+        <div className="rounded-3xl bg-gradient-to-br from-purple-600 via-fuchsia-600 to-blue-600 p-8 text-white shadow-xl">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-white/70">Creative Studio</p>
+              <h1 className="text-3xl font-bold">Create Collaborative Artwork</h1>
+              <p className="mt-3 max-w-2xl text-sm text-white/80">
+                Turn a prompt into a collectible, define how human and AI contributions are split, and prepare the metadata needed for minting.
+              </p>
             </div>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-              {aiModels.map((model) => (
-                <button
-                  key={model.id}
-                  onClick={() => handleInputChange('aiModel', model.id)}
-                  className={`p-4 rounded-xl border-2 transition-all text-left flex flex-col ${
-                    formData.aiModel === model.id
-                      ? 'border-purple-500 bg-purple-50/50 shadow-sm'
-                      : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2 w-full">
-                    {model.type === 'image' ? (
-                      <ImageIcon className={`w-5 h-5 ${formData.aiModel === model.id ? 'text-purple-600' : 'text-gray-400'}`} />
-                    ) : (
-                      <Type className={`w-5 h-5 ${formData.aiModel === model.id ? 'text-blue-600' : 'text-gray-400'}`} />
-                    )}
-                    {formData.aiModel === model.id && (
-                      <div className="w-2 h-2 rounded-full bg-purple-500"></div>
-                    )}
-                  </div>
-                  <div className={`text-sm font-bold ${formData.aiModel === model.id ? 'text-purple-900' : 'text-gray-700'}`}>{model.name}</div>
-                  <div className="text-xs text-gray-500 mt-1 line-clamp-1">{model.description || 'Advanced generation model'}</div>
-                </button>
-              ))}
+            <div className="rounded-2xl bg-white/10 p-3 backdrop-blur-sm">
+              <Cpu className="h-8 w-8" />
             </div>
-          </motion.div>
-          
-          {/* Prompt Input */}
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.2 }}
-            className="bg-white rounded-xl sm:rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6"
-          >
-            <div className="flex items-center mb-4 sm:mb-5">
-              <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center mr-3">
-                <Type className="w-4 h-4 text-blue-600" />
-              </div>
-              <h3 className="text-base sm:text-lg font-bold text-gray-900">Art Prompt</h3>
+          </div>
+        </div>
+
+        {currentStep >= 0 && (
+          <div className="rounded-3xl border border-purple-100 bg-white p-6 shadow-md dark:border-purple-900/20 dark:bg-gray-900">
+            <h3 className="mb-6 text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin text-purple-600" />
+              Generation in Progress
+            </h3>
+            <ProgressIndicator steps={creationSteps} currentStep={currentStep} />
+            <div className="mt-6 h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+              <div 
+                className="h-full bg-gradient-to-r from-purple-600 to-blue-600 transition-all duration-500 ease-out"
+                style={{ width: `${creationProgress}%` }}
+              />
             </div>
-            
-            <textarea
-              value={formData.prompt}
-              onChange={(e) => handleInputChange('prompt', e.target.value)}
-              placeholder="Describe your artwork in detail... (e.g., 'A futuristic cyberpunk city with neon lights and flying cars at night')"
-              className="w-full p-4 bg-gray-50 border-transparent rounded-xl focus:bg-white focus:ring-2 focus:ring-purple-200 focus:border-purple-500 transition-all resize-none text-sm sm:text-base min-h-[120px]"
-            />
-            
-            <div className="mt-4 flex flex-wrap gap-2">
-              {['Cyberpunk', 'Watercolor', 'Photorealistic', 'Anime', 'Oil Painting', '3D Render'].map((style) => (
-                <button
-                  key={style}
-                  onClick={() => handleInputChange('prompt', 
-                    formData.prompt ? `${formData.prompt}, ${style.toLowerCase()} style` : `${style.toLowerCase()} style`
-                  )}
-                  className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 hover:text-gray-900 rounded-lg text-xs font-semibold transition-colors"
-                >
-                  +{style}
-                </button>
-              ))}
-            </div>
-          </motion.div>
-          
-          {/* Collaboration Split */}
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.3 }}
-            className="bg-white rounded-xl sm:rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6"
-          >
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center">
-                <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center mr-3">
-                  <Sliders className="w-4 h-4 text-indigo-600" />
-                </div>
-                <h3 className="text-base sm:text-lg font-bold text-gray-900">Collaboration Split</h3>
-              </div>
-              <div className="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">
-                {formData.humanContribution}% / {formData.aiContribution}%
-              </div>
-            </div>
-            
-            <div className="space-y-6">
-              <div className="relative pt-1">
-                {/* Custom track showing both colors */}
-                <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden flex absolute top-[50%] -translate-y-1/2 pointer-events-none">
-                  <div className="h-full bg-purple-500" style={{ width: `${formData.humanContribution}%` }}></div>
-                  <div className="h-full bg-blue-500" style={{ width: `${formData.aiContribution}%` }}></div>
-                </div>
-                
-                {/* The actual slider (invisible track, visible thumb) */}
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={formData.humanContribution}
-                  onChange={(e) => handleContributionChange('human', parseInt(e.target.value))}
-                  className="w-full h-2 rounded-full appearance-none cursor-pointer bg-transparent relative z-10 slider-thumb"
-                />
-              </div>
-              
-              <div className="flex justify-between text-sm">
-                <div className="flex items-center">
-                  <div className="w-3 h-3 rounded-full bg-purple-500 mr-2"></div>
-                  <span className="font-semibold text-gray-700">Human Control</span>
-                </div>
-                <div className="flex items-center">
-                  <span className="font-semibold text-gray-700 mr-2">AI Freedom</span>
-                  <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-                </div>
-              </div>
-            </div>
-          </motion.div>
-          
-          {/* Settings */}
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.4 }}
-            className="bg-white rounded-xl sm:rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6"
-          >
-            <div className="flex items-center justify-between mb-4 sm:mb-5">
-              <div className="flex items-center">
-                <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center mr-3">
-                  <Settings className="w-4 h-4 text-gray-600" />
-                </div>
-                <h3 className="text-base sm:text-lg font-bold text-gray-900">Advanced Settings</h3>
-              </div>
-              <button
-                onClick={() => setShowAdvancedSettings(true)}
-                className="px-3 py-1.5 text-xs font-bold text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors flex items-center space-x-1"
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900 md:p-8">
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="space-y-2">
+              <label htmlFor="aiModel" className="text-sm font-semibold text-gray-900 dark:text-white">
+                AI Model
+              </label>
+              <select
+                id="aiModel"
+                value={form.aiModel}
+                onChange={(event) => updateField('aiModel', event.target.value)}
+                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
               >
-                <Sliders className="w-3 h-3" />
-                <span>AI Parameters</span>
+                <option value="">Select a model</option>
+                {models.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name}
+                  </option>
+                ))}
+              </select>
+              {errors.aiModel && <p className="text-sm text-red-600">{errors.aiModel}</p>}
+            </div>
+
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={() => setShowRegisterModal(true)}
+                className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 px-4 py-3 font-semibold text-gray-700 transition hover:border-purple-300 hover:text-purple-700 dark:border-gray-700 dark:text-gray-200 dark:hover:border-purple-700"
+              >
+                <Plus className="h-4 w-4" />
+                Register New AI Model
               </button>
             </div>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Art Style</label>
-                <select
-                  value={formData.style}
-                  onChange={(e) => handleInputChange('style', e.target.value)}
-                  className="w-full p-3 bg-gray-50 border-transparent rounded-xl text-sm font-medium text-gray-700 focus:bg-white focus:ring-2 focus:ring-purple-200 focus:border-purple-500 transition-all appearance-none cursor-pointer"
-                >
-                  <option value="realistic">Realistic</option>
-                  <option value="abstract">Abstract</option>
-                  <option value="surreal">Surreal</option>
-                  <option value="cartoon">Cartoon</option>
-                </select>
+
+            <div className="space-y-2">
+              <label htmlFor="humanContribution" className="text-sm font-semibold text-gray-900 dark:text-white">
+                Human Contribution (%)
+              </label>
+              <input
+                id="humanContribution"
+                type="number"
+                min="0"
+                max="100"
+                value={form.humanContribution}
+                onChange={handleHumanContributionChange}
+                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+              />
+              {errors.humanContribution && <p className="text-sm text-red-600">{errors.humanContribution}</p>}
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="aiContribution" className="text-sm font-semibold text-gray-900 dark:text-white">
+                AI Contribution (%)
+              </label>
+              <input
+                id="aiContribution"
+                type="number"
+                min="0"
+                max="100"
+                value={form.aiContribution}
+                onChange={handleAiContributionChange}
+                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+              />
+              {errors.aiContribution && <p className="text-sm text-red-600">{errors.aiContribution}</p>}
+            </div>
+          </div>
+
+          {errors.contributions && (
+            <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+              {errors.contributions}
+            </div>
+          )}
+
+          <div className="mt-6 space-y-2">
+            <label htmlFor="prompt" className="text-sm font-semibold text-gray-900 dark:text-white">
+              Prompt
+            </label>
+            <textarea
+              id="prompt"
+              rows={5}
+              value={form.prompt}
+              onChange={(event) => updateField('prompt', event.target.value)}
+              placeholder="Describe the artwork you want to create..."
+              className="w-full rounded-3xl border border-gray-200 bg-white px-4 py-4 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+            />
+            {errors.prompt && <p className="text-sm text-red-600">{errors.prompt}</p>}
+          </div>
+
+          <div className="mt-6 space-y-2">
+            <label htmlFor="tokenURI" className="text-sm font-semibold text-gray-900 dark:text-white">
+              Token URI
+            </label>
+            <input
+              id="tokenURI"
+              type="text"
+              value={form.tokenURI}
+              onChange={(event) => updateField('tokenURI', event.target.value)}
+              placeholder="https://metadata.example.com/artwork/1"
+              className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+            />
+            {errors.tokenURI && <p className="text-sm text-red-600">{errors.tokenURI}</p>}
+          </div>
+
+          <div className="mt-6 rounded-3xl border border-gray-200 bg-gray-50 p-5 dark:border-gray-800 dark:bg-gray-950/60">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((current) => !current)}
+              className="flex w-full items-center justify-between gap-3 text-left"
+            >
+              <div className="flex items-center gap-3">
+                <div className="rounded-2xl bg-white p-2 text-purple-600 shadow-sm dark:bg-gray-900">
+                  <Settings2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="font-semibold text-gray-900 dark:text-white">Advanced Options</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Metadata controls and generation settings</p>
+                </div>
               </div>
-              
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Aspect Ratio</label>
-                <select
-                  value={formData.aspectRatio}
-                  onChange={(e) => handleInputChange('aspectRatio', e.target.value)}
-                  className="w-full p-3 bg-gray-50 border-transparent rounded-xl text-sm font-medium text-gray-700 focus:bg-white focus:ring-2 focus:ring-purple-200 focus:border-purple-500 transition-all appearance-none cursor-pointer"
-                >
-                  <option value="1:1">Square (1:1)</option>
-                  <option value="16:9">Landscape (16:9)</option>
-                  <option value="9:16">Portrait (9:16)</option>
-                  <option value="4:3">Standard (4:3)</option>
-                </select>
-              </div>
-              
-              <div className="sm:col-span-2 mt-2">
-                <label className="flex items-center p-3 bg-gray-50 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={formData.canEvolve}
-                    onChange={(e) => handleInputChange('canEvolve', e.target.checked)}
-                    className="w-5 h-5 text-purple-600 border-gray-300 rounded focus:ring-purple-500 bg-white"
-                  />
-                  <div className="ml-3">
-                    <span className="block text-sm font-bold text-gray-900">Allow Evolution</span>
-                    <span className="block text-xs text-gray-500">Let other users build upon your artwork</span>
+              <span className="text-sm font-semibold text-purple-600">{showAdvanced ? 'Hide' : 'Show'}</span>
+            </button>
+
+            {showAdvanced && (
+              <div className="mt-5 grid gap-5 md:grid-cols-2">
+                <div className="space-y-2 md:col-span-2">
+                  <label htmlFor="contentHash" className="text-sm font-semibold text-gray-900 dark:text-white">
+                    Content Hash
+                  </label>
+                  <div className="flex flex-col gap-3 md:flex-row">
+                    <input
+                      id="contentHash"
+                      type="text"
+                      value={form.contentHash}
+                      onChange={(event) => updateField('contentHash', event.target.value)}
+                      placeholder="0x..."
+                      className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 font-mono text-sm text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => updateField('contentHash', generateHash())}
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl border border-gray-200 px-4 py-3 font-semibold text-gray-700 transition hover:border-purple-300 hover:text-purple-700 dark:border-gray-700 dark:text-gray-200"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      Generate Hash
+                    </button>
                   </div>
+                </div>
+
+                <label className="flex items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900">
+                  <input
+                    id="canEvolve"
+                    type="checkbox"
+                    checked={form.canEvolve}
+                    onChange={(event) => updateField('canEvolve', event.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                  />
+                  <span className="text-sm font-semibold text-gray-900 dark:text-white">Can Evolve</span>
                 </label>
-              </div>
-            </div>
-            
-            {/* Advanced Parameters Status */}
-            <div className="mt-4 p-3 bg-purple-50 rounded-lg">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <div className="w-2 h-2 rounded-full bg-purple-500"></div>
-                  <span className="text-xs font-medium text-purple-700">Advanced AI Parameters</span>
+
+                <div className="rounded-2xl border border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900">
+                  <p className="mb-2 text-sm font-semibold text-gray-900 dark:text-white">Generation Controls</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Temperature {advancedParameters.temperature}, Top K {advancedParameters.topK}, Top P {advancedParameters.topP}, Guidance {advancedParameters.guidanceScale}, Steps {advancedParameters.numInferenceSteps}
+                  </p>
+                  {setAdvancedParameters && (
+                    <button
+                      type="button"
+                      onClick={() => setAdvancedParameters(defaultAdvancedParameters)}
+                      className="mt-3 text-sm font-semibold text-purple-600"
+                    >
+                      Reset advanced parameters
+                    </button>
+                  )}
                 </div>
-                <span className="text-xs text-purple-600">
-                  {Object.keys(advancedParameters).length} parameters configured
-                </span>
               </div>
-              <div className="mt-2 text-xs text-purple-600">
-                Guidance: {advancedParameters.guidanceScale.toFixed(1)} | 
-                Steps: {advancedParameters.numInferenceSteps} | 
-                Quality: {(advancedParameters.quality * 100).toFixed(0)}%
-              </div>
-            </div>
-          </motion.div>
-        </div>
-        
-        {/* Right Column - Canvas */}
-        <div className="lg:col-span-5 space-y-6">
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.1 }}
-            className="bg-white rounded-xl sm:rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6 sticky top-24"
-          >
-            <div className="flex items-center justify-between mb-4 sm:mb-5">
-              <div className="flex items-center">
-                <div className="w-8 h-8 rounded-lg bg-pink-50 flex items-center justify-center mr-3">
-                  <Palette className="w-4 h-4 text-pink-600" />
-                </div>
-                <h3 className="text-base sm:text-lg font-bold text-gray-900">Sketch Pad</h3>
-              </div>
-              {humanInput && (
-                <button
-                  onClick={clearCanvas}
-                  className="text-xs font-bold px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
-                >
+            )}
+          </div>
+
+          {(submitError || store.error) && (
+            <div className="mt-6 flex items-start justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+              <p>{submitError || store.error}</p>
+              {clearError && (
+                <button type="button" onClick={clearError} className="font-semibold text-red-700 dark:text-red-300">
                   Clear
                 </button>
               )}
             </div>
-            
-            <div className="relative aspect-square w-full rounded-xl overflow-hidden border-2 border-gray-100 bg-gray-50">
-              <canvas
-                ref={canvasRef}
-                width={400}
-                height={400}
-                className="w-full h-full cursor-crosshair touch-none bg-white"
-                onMouseDown={startDrawing}
-                onMouseMove={handleCanvasDraw}
-                onMouseUp={stopDrawing}
-                onMouseLeave={stopDrawing}
-                onTouchStart={startDrawing}
-                onTouchMove={handleCanvasDraw}
-                onTouchEnd={stopDrawing}
-                onTouchCancel={stopDrawing}
-                style={{ touchAction: 'none' }}
-              />
-              
-              {!humanInput && !isDrawing && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-gray-400">
-                  <Palette className="w-12 h-12 mb-3 opacity-20" />
-                  <p className="text-sm font-semibold">Draw your base concept here</p>
-                  <p className="text-xs mt-1">Optional, but improves results</p>
-                </div>
-              )}
+          )}
+
+          {successMessage && (
+            <div className="mt-6 flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300">
+              <CheckCircle2 className="h-5 w-5" />
+              <p>{successMessage}</p>
             </div>
-            
-            {/* Create Button */}
-            <div className="mt-6">
-              <button
-                onClick={handleSubmit}
-                disabled={isLoading || !address}
-                className="w-full py-3.5 sm:py-4 bg-gradient-to-r from-purple-600 via-purple-500 to-blue-500 text-white font-bold rounded-xl hover:shadow-lg hover:shadow-purple-500/25 disabled:opacity-50 disabled:shadow-none transition-all flex items-center justify-center text-base sm:text-lg transform active:scale-[0.98]"
-              >
-                {isLoading ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent mr-3"></div>
-                    Generating Magic...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-5 h-5 mr-2" />
-                    Create Masterpiece
-                  </>
-                )}
-              </button>
-              
-              {!address && (
-                <p className="text-center text-xs font-bold text-red-500 mt-3 bg-red-50 py-2 rounded-lg">
-                  Connect wallet to create
-                </p>
-              )}
+          )}
+
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-sm text-gray-500 dark:text-gray-400">
+              Contribution split: <span className="font-semibold text-gray-900 dark:text-white">{form.humanContribution}% Human / {form.aiContribution}% AI</span>
             </div>
-          </motion.div>
-        </div>
+            <button
+              type="submit"
+              disabled={isLoading || currentStep >= 0}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-purple-600 to-blue-600 px-6 py-3 font-semibold text-white shadow-lg transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              <Sparkles className="h-4 w-4" />
+              {currentStep >= 0 ? 'Processing...' : 'Create Artwork'}
+            </button>
+          </div>
+        </form>
       </div>
-      
-      {/* Advanced Settings Modal */}
-      <AdvancedSettings
-        isOpen={showAdvancedSettings}
-        onClose={() => setShowAdvancedSettings(false)}
-        parameters={advancedParameters}
-        onParametersChange={handleAdvancedParametersChange}
-        presets={parameterPresets}
-        onPresetApply={handlePresetApply}
-      />
-      
-      {/* Styles for range slider thumb */}
-      <style dangerouslySetInnerHTML={{__html: `
-        .slider-thumb::-webkit-slider-thumb {
-          appearance: none;
-          width: 20px;
-          height: 20px;
-          border-radius: 50%;
-          background: white;
-          border: 2px solid #8b5cf6;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-          cursor: pointer;
-        }
-        .slider-thumb::-moz-range-thumb {
-          width: 20px;
-          height: 20px;
-          border-radius: 50%;
-          background: white;
-          border: 2px solid #8b5cf6;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-          cursor: pointer;
-        }
-      `}} />
-    </div>
+
+      {showRegisterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl dark:bg-gray-900">
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Register AI Model</h2>
+                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Add a new model option for future artwork generation.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRegisterModal(false)}
+                className="rounded-full bg-gray-100 px-3 py-1 text-sm font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+              >
+                Close
+              </button>
+            </div>
+
+            <form onSubmit={handleRegisterModel} className="space-y-4">
+              <div className="space-y-2">
+                <label htmlFor="modelName" className="text-sm font-semibold text-gray-900 dark:text-white">
+                  Model Name
+                </label>
+                <input
+                  id="modelName"
+                  type="text"
+                  value={registerModelName}
+                  onChange={(event) => setRegisterModelName(event.target.value)}
+                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="modelDescription" className="text-sm font-semibold text-gray-900 dark:text-white">
+                  Description
+                </label>
+                <textarea
+                  id="modelDescription"
+                  rows={3}
+                  value={registerModelDescription}
+                  onChange={(event) => setRegisterModelDescription(event.target.value)}
+                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-gray-900 outline-none transition focus:border-purple-500 focus:ring-2 focus:ring-purple-200 dark:border-gray-700 dark:bg-gray-950 dark:text-white"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowRegisterModal(false)}
+                  className="rounded-2xl border border-gray-200 px-4 py-2 font-semibold text-gray-700 dark:border-gray-700 dark:text-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-2xl bg-gradient-to-r from-purple-600 to-blue-600 px-4 py-2 font-semibold text-white"
+                >
+                  Save Model
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </section>
   );
 };
 

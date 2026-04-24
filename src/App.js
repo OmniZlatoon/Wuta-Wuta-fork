@@ -1,192 +1,132 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-    Image as GalleryIcon,
-    LayoutDashboard,
-    Sparkles,
-    User,
-    History,
-    FileText
-} from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { LayoutDashboard, Image, PlusCircle, History, Sparkles, Settings as SettingsIcon, Send } from 'lucide-react';
+
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
-import Gallery from './components/Gallery';
 import Dashboard from './components/Dashboard';
+import MintingDashboard from './components/MintingDashboard';
+import ArtMintingStepper from './components/ArtMintingStepper';
+import Gallery from './components/Gallery';
 import CreateArt from './components/CreateArt';
-import UserProfile from './components/UserProfile';
+import Settings from './components/Settings';
 import TransactionHistory from './components/TransactionHistory';
-import PromptHistorySidebar from './components/PromptHistorySidebar';
-import CommandPalette from './components/CommandPalette';
-import MobileBottomNav from './components/MobileBottomNav';
-import ErrorBoundary from './components/ErrorBoundary';
-import WalletConnectionModal from './components/WalletConnectionModal';
+import ThemeProvider from './contexts/ThemeContext';
 import { useWalletStore } from './store/walletStore';
-import { Toaster } from 'react-hot-toast';
-
-const navigation = [
-    { id: 'gallery', name: 'Gallery', icon: GalleryIcon },
-    { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
-    { id: 'create', name: 'Create Art', icon: Sparkles },
-    { id: 'profile', name: 'Profile', icon: User },
-    { id: 'transactions', name: 'Transactions', icon: History },
-];
+import { useMuseStore } from './store/museStore';
+import { NotificationContainer } from './components/ui/ToastNotification';
 
 const App = () => {
-    const [activeTab, setActiveTab] = useState('gallery');
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-    const [isPaletteOpen, setIsPaletteOpen] = useState(false);
-    const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
-    const [currentPrompt, setCurrentPrompt] = useState('');
-    const [isPromptHistoryOpen, setIsPromptHistoryOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  
+  const { 
+    address, 
+    isConnected, 
+    connectWallet, 
+    disconnectWallet, 
+    checkConnection 
+  } = useWalletStore();
 
-    const { address, isConnected, checkConnection, disconnectWallet } = useWalletStore();
+  const { initializeMuse } = useMuseStore();
 
-    // Wallet Persistence Watcher
-    useEffect(() => {
-        const initWallet = async () => {
-            if (localStorage.getItem('walletConnected') === 'true') {
-                await checkConnection();
-            }
-        };
-        initWallet();
-    }, [checkConnection]);
+  // Initial setup
+  useEffect(() => {
+    const init = async () => {
+      // Initialize theme
+      const storedTheme = localStorage.getItem('theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      const shouldUseDark = storedTheme ? storedTheme === 'dark' : prefersDark;
+      document.documentElement.classList.toggle('dark', shouldUseDark);
 
-    // Global Ctrl+K / Cmd+K listener
-    useEffect(() => {
-        const handleGlobalKeyDown = (e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                e.preventDefault();
-                setIsPaletteOpen((prev) => !prev);
-            }
-        };
-        window.addEventListener('keydown', handleGlobalKeyDown);
-        return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-    }, []);
-
-    const handleTabChange = useCallback((tabId) => {
-        setActiveTab(tabId);
-        setIsSidebarOpen(false);
-    }, []);
-
-    const handleOpenPalette = useCallback(() => {
-        setIsPaletteOpen(true);
-    }, []);
-
-    const handleClosePalette = useCallback(() => {
-        setIsPaletteOpen(false);
-    }, []);
-
-    const handleMenuClick = useCallback(() => {
-        setIsSidebarOpen((prev) => !prev);
-    }, []);
-
-    const handleCloseSidebar = useCallback(() => {
-        setIsSidebarOpen(false);
-    }, []);
-
-    const handleOpenWalletModal = useCallback(() => {
-        setIsWalletModalOpen(true);
-    }, []);
-
-    const handleCloseWalletModal = useCallback(() => {
-        setIsWalletModalOpen(false);
-    }, []);
-
-    const renderPage = () => {
-        switch (activeTab) {
-            case 'gallery':
-                return <Gallery />;
-            case 'dashboard':
-                return <Dashboard />;
-            case 'create':
-                return (
-                    <CreateArt
-                        currentPrompt={currentPrompt}
-                        setCurrentPrompt={setCurrentPrompt}
-                    />
-                );
-            case 'profile':
-                return <UserProfile />;
-            case 'transactions':
-                return <TransactionHistory />;
-            default:
-                return <Gallery />;
-        }
+      // Check wallet connection
+      await checkConnection();
+      
+      // Initialize Muse store
+      await initializeMuse();
     };
+    
+    init();
+  }, [checkConnection, initializeMuse]);
 
-    return (
-        <ErrorBoundary>
-            <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-300">
-                <Toaster position="top-right" />
+  const navigation = useMemo(
+    () => [
+      { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
+      { id: 'gallery', name: 'Gallery', icon: Image },
+      { id: 'create', name: 'Create', icon: PlusCircle },
+      { id: 'minting', name: 'Minting', icon: Send },
+      { id: 'history', name: 'History', icon: History },
+      { id: 'ai', name: 'AI Studio', icon: Sparkles },
+      { id: 'settings', name: 'Settings', icon: SettingsIcon },
+    ],
+    []
+  );
 
-                {/* Header */}
-                <Header
-                    onMenuClick={handleMenuClick}
-                    onConnectWallet={handleOpenWalletModal}
-                    onDisconnectWallet={disconnectWallet}
-                    address={address}
-                    isConnected={isConnected}
-                    onOpenPalette={handleOpenPalette}
-                />
+  const handleConnectWallet = async () => {
+    try {
+      await connectWallet();
+    } catch (error) {
+      console.error('Connection failed:', error);
+    }
+  };
 
-                <div className="flex pt-16 sm:pt-20">
-                    {/* Sidebar */}
-                    <Sidebar
-                        navigation={navigation}
-                        activeTab={activeTab}
-                        onTabChange={handleTabChange}
-                        isOpen={isSidebarOpen}
-                        onClose={handleCloseSidebar}
-                    />
+  const handleDisconnectWallet = () => {
+    disconnectWallet();
+  };
 
-                    {/* Main Content */}
-                    <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 pb-24 md:pb-8">
-                        <AnimatePresence mode="wait">
-                            <motion.div
-                                key={activeTab}
-                                initial={{ opacity: 0, y: 8 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -8 }}
-                                transition={{ duration: 0.2 }}
-                            >
-                                {renderPage()}
-                            </motion.div>
-                        </AnimatePresence>
-                    </main>
+  // Render main content based on activeTab
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'dashboard':
+        return <Dashboard />;
+      case 'minting':
+        return <MintingDashboard />;
+      case 'create':
+        return <CreateArt />;
+      case 'gallery':
+        return <Gallery />;
+      case 'ai':
+        return <ArtMintingStepper />;
+      case 'history':
+        return <TransactionHistory />;
+      case 'settings':
+        return <Settings />;
+      default:
+        // Render Dashboard as fallback for unhandled tabs
+        return <Dashboard />;
+    }
+  };
 
-                    {/* Prompt History Sidebar */}
-                    {activeTab === 'create' && (
-                        <PromptHistorySidebar
-                            isOpen={isPromptHistoryOpen}
-                            onClose={() => setIsPromptHistoryOpen(false)}
-                            onSelectPrompt={(prompt) => setCurrentPrompt(prompt)}
-                        />
-                    )}
-                </div>
+  return (
+    <ThemeProvider>
+    <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100 transition-colors duration-300">
+      <NotificationContainer />
+      <Header
+        onMenuClick={() => setIsSidebarOpen((prev) => !prev)}
+        onConnectWallet={handleConnectWallet}
+        onDisconnectWallet={handleDisconnectWallet}
+        address={address}
+        isConnected={isConnected}
+      />
 
-                {/* Mobile Bottom Nav */}
-                <MobileBottomNav
-                    activeTab={activeTab}
-                    onTabChange={handleTabChange}
-                    onOpenPalette={handleOpenPalette}
-                />
+      <div className="pt-16 sm:pt-20 md:flex">
+        <Sidebar
+          navigation={navigation}
+          activeTab={activeTab}
+          onTabChange={(tab) => {
+            setActiveTab(tab);
+            setIsSidebarOpen(false);
+          }}
+          isOpen={isSidebarOpen}
+          onClose={() => setIsSidebarOpen(false)}
+        />
 
-                {/* Command Palette */}
-                <CommandPalette
-                    isOpen={isPaletteOpen}
-                    onClose={handleClosePalette}
-                    onNavigate={handleTabChange}
-                    activeTab={activeTab}
-                />
-
-                {/* Wallet Connection Modal */}
-                <WalletConnectionModal
-                    isOpen={isWalletModalOpen}
-                    onClose={handleCloseWalletModal}
-                />
-            </div>
-        </ErrorBoundary>
-    );
+        <main className="flex-1 min-w-0">
+          {renderContent()}
+        </main>
+      </div>
+    </div>
+    </ThemeProvider>
+  );
 };
 
 export default App;
